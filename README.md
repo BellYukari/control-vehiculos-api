@@ -32,3 +32,7 @@ Antes de ejecutar el proyecto se necesita tener instalado:
 * Owen Javier Orellana Hernandez
 
 Desarrollado como parte de una prueba técnica para desarrollador web.
+
+## API desplegada
+
+https://control-vehiculos-api-production.up.railway.app
