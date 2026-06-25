@@ -1,4 +1,5 @@
 const pool = require("../config/db");
+const { validarVehiculoPayload } = require("../utils/validaciones");
 
 const obtenerVehiculos = async (req, res) => {
   try {
@@ -32,18 +33,24 @@ const obtenerVehiculos = async (req, res) => {
 const crearVehiculo = async (req, res) => {
   try {
     const { marca, modelo, placa } = req.body;
-
-    if (!marca || !modelo || !placa) {
+    const mensajeValidacion = validarVehiculoPayload(req.body);
+    if (mensajeValidacion) {
       return res.status(400).json({
         success: false,
-        message: "La marca, modelo y placa son obligatorios",
+        message: mensajeValidacion,
       });
     }
-
     const [result] = await pool.query(
-      "CALL spVehiculos(?, ?, ?, ?, ?, ?)",
-      ["INSERTAR", null, marca, modelo, placa, 1]
-    );
+    "CALL spVehiculos(?, ?, ?, ?, ?, ?)",
+    [
+      "INSERTAR",
+      null,
+      marca.trim(),
+      modelo.trim(),
+      placa.trim().toUpperCase(),
+      1,
+    ]
+  );
 
     res.status(201).json({
       success: true,
@@ -69,17 +76,25 @@ const actualizarVehiculo = async (req, res) => {
   try {
     const { id } = req.params;
     const { marca, modelo, placa, estado } = req.body;
+    const mensajeValidacion = validarVehiculoPayload(req.body);
 
-    if (!marca || !modelo || !placa) {
+    if (mensajeValidacion) {
       return res.status(400).json({
         success: false,
-        message: "La marca, modelo y placa son obligatorios",
+        message: mensajeValidacion,
       });
     }
 
     await pool.query(
       "CALL spVehiculos(?, ?, ?, ?, ?, ?)",
-      ["ACTUALIZAR", id, marca, modelo, placa, estado ?? 1]
+      [
+        "ACTUALIZAR",
+        id,
+        marca.trim(),
+        modelo.trim(),
+        placa.trim().toUpperCase(),
+        estado ?? 1,
+      ]
     );
 
     res.json({

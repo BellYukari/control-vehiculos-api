@@ -1,8 +1,16 @@
 const pool = require("../config/db");
+const { validarMovimientoPayload } = require("../utils/validaciones");
 
 const obtenerMovimientos = async (req, res) => {
   try {
-    const { fecha, vehiculo_id, motorista } = req.query;
+    const {
+      fecha,
+      fecha_inicio,
+      fecha_fin,
+      vehiculo_id,
+      motorista,
+      tipo_movimiento,
+    } = req.query;
 
     let query = `
       SELECT 
@@ -25,9 +33,22 @@ const obtenerMovimientos = async (req, res) => {
 
     const params = [];
 
+    // Mantiene compatibilidad con el filtro anterior por fecha exacta
     if (fecha) {
       query += " AND fecha = ?";
       params.push(fecha);
+    }
+
+    // Nuevo filtro por rango de fechas
+    if (fecha_inicio && fecha_fin) {
+      query += " AND fecha BETWEEN ? AND ?";
+      params.push(fecha_inicio, fecha_fin);
+    } else if (fecha_inicio) {
+      query += " AND fecha >= ?";
+      params.push(fecha_inicio);
+    } else if (fecha_fin) {
+      query += " AND fecha <= ?";
+      params.push(fecha_fin);
     }
 
     if (vehiculo_id) {
@@ -38,6 +59,11 @@ const obtenerMovimientos = async (req, res) => {
     if (motorista) {
       query += " AND motorista LIKE ?";
       params.push(`%${motorista}%`);
+    }
+
+    if (tipo_movimiento) {
+      query += " AND tipo_movimiento = ?";
+      params.push(tipo_movimiento);
     }
 
     query += " ORDER BY fecha DESC, hora DESC";
@@ -58,6 +84,62 @@ const obtenerMovimientos = async (req, res) => {
   }
 };
 
+const validarVehiculoActivo = async (vehiculo_id) => {
+  const [vehiculo] = await pool.query(
+    "SELECT id, estado FROM vehiculos WHERE id = ?",
+    [vehiculo_id]
+  );
+
+  if (vehiculo.length === 0) {
+    return "El vehículo seleccionado no existe.";
+  }
+
+  if (Number(vehiculo[0].estado) !== 1) {
+    return "No se pueden registrar movimientos para un vehículo inactivo.";
+  }
+
+  return "";
+};
+
+const validarKilometrajeNoMenorUltimo = async (
+  vehiculo_id,
+  kilometraje,
+  movimientoIdActual = null
+) => {
+  let query = `
+    SELECT kilometraje
+    FROM movimientos
+    WHERE vehiculo_id = ?
+  `;
+
+  const params = [vehiculo_id];
+
+  if (movimientoIdActual) {
+    query += " AND id <> ?";
+    params.push(movimientoIdActual);
+  }
+
+  query += `
+    ORDER BY fecha DESC, hora DESC, id DESC
+    LIMIT 1
+  `;
+
+  const [ultimoMovimiento] = await pool.query(query, params);
+
+  if (ultimoMovimiento.length === 0) {
+    return "";
+  }
+
+  const ultimoKilometraje = Number(ultimoMovimiento[0].kilometraje);
+  const nuevoKilometraje = Number(kilometraje);
+
+  if (nuevoKilometraje < ultimoKilometraje) {
+    return `El kilometraje no puede ser menor al último registrado para este vehículo: ${ultimoKilometraje}.`;
+  }
+
+  return "";
+};
+
 const crearMovimiento = async (req, res) => {
   try {
     const {
@@ -69,6 +151,33 @@ const crearMovimiento = async (req, res) => {
       kilometraje,
       observaciones,
     } = req.body;
+
+    const mensajeValidacion = validarMovimientoPayload(req.body);
+    if (mensajeValidacion) {
+      return res.status(400).json({
+        success: false,
+        message: mensajeValidacion,
+      });
+    }
+
+    const vehiculoActivo = await validarVehiculoActivo(vehiculo_id);
+    if (vehiculoActivo) {
+      return res.status(400).json({
+        success: false,
+        message: vehiculoActivo,
+      });
+    }
+
+    const kilometrajeValido = await validarKilometrajeNoMenorUltimo(
+      vehiculo_id,
+      kilometraje
+    );
+    if (kilometrajeValido) {
+      return res.status(400).json({
+        success: false,
+        message: kilometrajeValido,
+      });
+    }
 
     if (
       !vehiculo_id ||
@@ -187,20 +296,33 @@ const actualizarMovimiento = async (req, res) => {
       observaciones,
     } = req.body;
 
-    if (
-      !vehiculo_id ||
-      !motorista ||
-      !tipo_movimiento ||
-      !fecha ||
-      !hora ||
-      kilometraje === undefined ||
-      kilometraje === null ||
-      kilometraje === ""
-    ) {
+    const mensajeValidacion = validarMovimientoPayload(req.body);
+    if (mensajeValidacion) {
       return res.status(400).json({
         success: false,
-        message:
-          "Vehículo, motorista, tipo de movimiento, fecha, hora y kilometraje son obligatorios",
+        message: mensajeValidacion,
+      });
+    }
+
+    const mensajeVehiculo = await validarVehiculoActivo(vehiculo_id);
+
+    if (mensajeVehiculo) {
+      return res.status(400).json({
+        success: false,
+        message: mensajeVehiculo,
+      });
+    }
+
+    const mensajeKilometraje = await validarKilometrajeNoMenorUltimo(
+      vehiculo_id,
+      kilometraje,
+      id
+    );
+
+    if (mensajeKilometraje) {
+      return res.status(400).json({
+        success: false,
+        message: mensajeKilometraje,
       });
     }
 
@@ -210,7 +332,7 @@ const actualizarMovimiento = async (req, res) => {
         "ACTUALIZAR",
         id,
         vehiculo_id,
-        motorista,
+        motorista.trim(),
         tipo_movimiento,
         fecha,
         hora,
